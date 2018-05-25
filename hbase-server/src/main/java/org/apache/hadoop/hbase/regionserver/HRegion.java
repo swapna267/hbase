@@ -674,6 +674,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   private final MetricsRegionWrapperImpl metricsRegionWrapper;
   private final Durability regionDurability;
   private final boolean regionStatsEnabled;
+  private final boolean doSkipBigRows;
   // Stores the replication scope of the various column families of the table
   // that has non-default scope
   private final NavigableMap<byte[], Integer> replicationScope = new TreeMap<>(
@@ -840,6 +841,8 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     this.maxCellSize = conf.getLong(HBASE_MAX_CELL_SIZE_KEY, DEFAULT_MAX_CELL_SIZE);
     this.miniBatchSize = conf.getInt(HBASE_REGIONSERVER_MINIBATCH_SIZE,
         DEFAULT_HBASE_REGIONSERVER_MINIBATCH_SIZE);
+    this.doSkipBigRows = conf.getBoolean(HConstants.TABLE_SKIP_BIGROWS_KEY,
+            HConstants.TABLE_SKIP_BIGROWS_DEFAULT);
   }
 
   void setHTableSpecificConf() {
@@ -6613,12 +6616,16 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
 
           // Ok, we are good, let's try to get some results from the main heap.
           try {
+            LOG.info("scanner context progress before:"+scannerContext.getKeepProgress());
             populateResult(results, this.storeHeap, scannerContext, current);
           } catch(RowTooBigException e) {
-            this.storeHeap.reseek(PrivateCellUtil.createLastOnRow(current));
-            results.clear();
-            scannerContext.clearProgress();
-            continue;
+            if (doSkipBigRows) {
+              this.storeHeap.reseek(PrivateCellUtil.createLastOnRow(current));
+              results.clear();
+              continue;
+            } else {
+              throw e;
+            }
           }
 
 
@@ -6685,7 +6692,18 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
             boolean mayHaveData = joinedHeapMayHaveData(current);
             if (mayHaveData) {
               joinedContinuationRow = current;
-              populateFromJoinedHeap(results, scannerContext);
+
+              try {
+                populateFromJoinedHeap(results, scannerContext);
+              } catch(RowTooBigException e) {
+                if (doSkipBigRows) {
+                  joinedContinuationRow = null;
+                  results.clear();
+                  continue;
+                } else {
+                  throw e;
+                }
+              }
 
               if (scannerContext.checkAnyLimitReached(LimitScope.BETWEEN_CELLS)) {
                 return true;
@@ -6697,9 +6715,13 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
           try {
             populateFromJoinedHeap(results, scannerContext);
           } catch(RowTooBigException e) {
-            joinedContinuationRow = null;
-            results.clear();
-            continue;
+            if (doSkipBigRows) {
+              joinedContinuationRow = null;
+              results.clear();
+              continue;
+            } else {
+              throw e;
+            }
           }
 
           if (scannerContext.checkAnyLimitReached(LimitScope.BETWEEN_CELLS)) {

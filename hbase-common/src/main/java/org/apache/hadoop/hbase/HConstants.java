@@ -365,6 +365,16 @@ public final class HConstants {
   public static final long TABLE_MAX_ROWSIZE_DEFAULT = 1024 * 1024 * 1024L;
 
   /**
+   * Whether to skip rows with size more than hbase.table.max.rowsize when doing the table scan
+   */
+  public static final String TABLE_SKIP_BIGROWS_KEY = "hbase.scanner.skip.bigrows";
+
+  /**
+   * Default value for hbase.scanner.skip.bigrows
+   */
+  public static final boolean TABLE_SKIP_BIGROWS_DEFAULT = false;
+
+  /**
    * The max number of threads used for opening and closing stores or store
    * files in parallel
    */
